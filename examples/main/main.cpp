@@ -76,6 +76,7 @@ struct whisper_params {
     bool output_jsn     = false;
     bool print_special  = false;
     bool print_colors   = false;
+    bool print_proba    = false;
     bool print_progress = false;
     bool no_timestamps  = false;
 
@@ -135,6 +136,7 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-of"   || arg == "--output-file")    { params.fname_out.emplace_back(argv[++i]); }
         else if (arg == "-ps"   || arg == "--print-special")  { params.print_special  = true; }
         else if (arg == "-pc"   || arg == "--print-colors")   { params.print_colors   = true; }
+        else if (arg == "-pr"   || arg == "--print-proba") { params.print_proba = true; }
         else if (arg == "-pp"   || arg == "--print-progress") { params.print_progress = true; }
         else if (arg == "-nt"   || arg == "--no-timestamps")  { params.no_timestamps  = true; }
         else if (arg == "-l"    || arg == "--language")       { params.language       = argv[++i]; }
@@ -184,6 +186,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -of FNAME, --output-file FNAME [%-7s] output file path (without file extension)\n",      "");
     fprintf(stderr, "  -ps,       --print-special     [%-7s] print special tokens\n",                           params.print_special ? "true" : "false");
     fprintf(stderr, "  -pc,       --print-colors      [%-7s] print colors\n",                                   params.print_colors ? "true" : "false");
+    fprintf(stderr, "  -pr,       --print-proba       [%-7s] print proba\n",                                    params.print_proba ? "true" : "false");
     fprintf(stderr, "  -pp,       --print-progress    [%-7s] print progress\n",                                 params.print_progress ? "true" : "false");
     fprintf(stderr, "  -nt,       --no-timestamps     [%-7s] do not print timestamps\n",                        params.no_timestamps ? "false" : "true");
     fprintf(stderr, "  -l LANG,   --language LANG     [%-7s] spoken language ('auto' for auto-detect)\n",       params.language.c_str());
@@ -427,6 +430,13 @@ bool output_json(struct whisper_context * ctx, const char * fname, const whisper
         end_value(end);
     };
 
+    auto value_f = [&](const char *name, const float val, bool end = false) {
+        start_value(name);
+        fout << val;
+        end_value(end);
+    };
+
+
     auto value_b = [&](const char *name, const bool val, bool end = false) {
         start_value(name);
         fout << (val ? "true" : "false");
@@ -472,21 +482,23 @@ bool output_json(struct whisper_context * ctx, const char * fname, const whisper
 
             const int n_segments = whisper_full_n_segments(ctx);
             for (int i = 0; i < n_segments; ++i) {
-                const char * text = whisper_full_get_segment_text(ctx, i);
-                const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
-                const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
-
-                start_obj();
-                    start_obj("timestanps");
-                        value_s("from", to_timestamp(t0, true).c_str());
-                        value_s("to", to_timestamp(t1, true).c_str(), true);
-                    end_obj();
-                    start_obj("offsets");
-                        value_i("from", t0 * 10);
-                        value_i("to", t1 * 10, true);
-                    end_obj();
-                    value_s("text", text, true);
-                end_obj(i == (n_segments - 1));
+                const int n_tokens = whisper_full_n_tokens(ctx, i);
+                for (int j = 0; j < n_tokens; ++j) {
+                    if (params.print_special == false) {
+                        const whisper_token id = whisper_full_get_token_id(ctx, i, j);
+                        if (id >= whisper_token_eot(ctx)) {
+                            continue;
+                        }
+                    }
+                    const char * text = whisper_full_get_token_text(ctx, i, j);
+                    const whisper_token_data x = whisper_full_get_token_data(ctx, i, j);
+                    start_obj();
+                        value_f("proba", x.p, true);
+                        value_s("text", text, true);
+                        value_i("t0", x.t0 * 10, true);
+                        value_i("t1", x.t1 * 10, true);
+                    end_obj(i == (n_segments - 1) && j == (n_tokens - 1));
+                }
             }
 
         end_arr(true);
@@ -802,3 +814,6 @@ int main(int argc, char ** argv) {
 
     return 0;
 }
+
+
+# ./main -l fr -m models/ggml-large.bin -f aa60.wav --print-colors --output-json --max-len 1 --output-file o
