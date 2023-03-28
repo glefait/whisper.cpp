@@ -816,4 +816,4 @@ int main(int argc, char ** argv) {
 }
 
 
-# ./main -l fr -m models/ggml-large.bin -f aa60.wav --print-colors --output-json --max-len 1 --output-file o
+// ./main -l fr -m models/ggml-large.bin -f aa60.wav --print-colors --output-json --max-len 1 --output-file o
